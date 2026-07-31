@@ -1,0 +1,87 @@
+{
+  "app": {
+    "name": "CivicConnect TN",
+    "tagline": "Government of Tamil Nadu — Smart Civic Issue Management Platform"
+  },
+  "nav": {
+    "home": "Home",
+    "submit": "Submit Issue",
+    "nearby": "Nearby Issues",
+    "login": "Sign In",
+    "signup": "Sign Up",
+    "about": "About",
+    "logout": "Sign Out"
+  },
+  "landing": {
+    "hero_title": "Your Tamil Nadu, Your Voice",
+    "hero_subtitle": "Report civic issues in Tamil Nadu and track them from submission to resolution — with full transparency and time-bound accountability.",
+    "submit_cta": "Report an Issue",
+    "track_cta": "Track My Issues",
+    "feature_ai": "AI-Powered Categorization",
+    "feature_escalation": "8-Level Auto-Escalation",
+    "feature_realtime": "Real-time Status Tracking",
+    "feature_map": "Nearby Issues Map"
+  },
+  "submit": {
+    "title": "Submit Issue",
+    "issue_title": "Issue Title",
+    "description": "Description",
+    "category": "Category",
+    "location": "Location",
+    "media": "Attach Photos/Videos",
+    "visibility": "Visibility",
+    "public": "Public Issue",
+    "private": "Private Issue",
+    "submit_btn": "Submit Issue",
+    "success": "Issue submitted successfully!",
+    "login_prompt": "Not logged in? Sign in first to track your issue after submission."
+  },
+  "auth": {
+    "login_title": "Welcome Back",
+    "login_subtitle": "Sign in to track your complaints",
+    "signup_title": "Create Account",
+    "email": "Email",
+    "password": "Password",
+    "login_btn": "Sign In",
+    "signup_btn": "Create Account",
+    "no_account": "Don't have an account?",
+    "has_account": "Already have an account?"
+  },
+  "status": {
+    "received": "Received",
+    "ai_processing": "AI Processing",
+    "assigned": "Assigned",
+    "in_progress": "In Progress",
+    "resolution_submitted": "Resolution Submitted",
+    "verified": "Verified",
+    "closed": "Closed",
+    "escalated": "Escalated"
+  },
+  "dashboard": {
+    "pending": "Pending Tasks",
+    "escalated": "Escalated",
+    "resolved": "Resolved",
+    "sla_compliance": "SLA Compliance",
+    "team_performance": "Team Performance",
+    "recent_complaints": "Recent Complaints"
+  },
+  "feedback": {
+    "accept": "Accept Resolution",
+    "reject": "Reject & Reopen",
+    "rating": "Rate the resolution",
+    "comment": "Leave a comment"
+  },
+  "common": {
+    "loading": "Loading...",
+    "error": "Something went wrong",
+    "retry": "Try Again",
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "view": "View",
+    "search": "Search...",
+    "no_results": "No results found",
+    "offline": "You are offline"
+  }
+}

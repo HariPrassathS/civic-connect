@@ -95,66 +95,28 @@ export async function signup(formData: FormData): Promise<AuthResult> {
   };
 }
 
-export async function loginWithOtp(formData: FormData): Promise<AuthResult> {
+export async function sendMagicLink(formData: FormData): Promise<AuthResult> {
   const supabase = await createClient();
+  const email = formData.get("email") as string;
 
-  const phone = formData.get("phone") as string;
-
-  if (!phone) {
-    return { error: "Phone number is required." };
+  if (!email) {
+    return { error: "Email is required." };
   }
 
   const { error } = await supabase.auth.signInWithOtp({
-    phone,
-  });
-
-  if (error) {
-    return { error: error.message };
-  }
-
-  return { success: "OTP sent! Check your phone." };
-}
-
-export async function verifyOtp(formData: FormData): Promise<AuthResult> {
-  const supabase = await createClient();
-
-  const phone = formData.get("phone") as string;
-  const token = formData.get("token") as string;
-
-  if (!phone || !token) {
-    return { error: "Phone number and OTP are required." };
-  }
-
-  const { error } = await supabase.auth.verifyOtp({
-    phone,
-    token,
-    type: "sms",
-  });
-
-  if (error) {
-    return { error: error.message };
-  }
-
-  // Get user's role to redirect to correct dashboard
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (user) {
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", user.id)
-      .single();
-
-    if (profile?.role) {
-      const path =
-        ROLE_DASHBOARD_PATH[profile.role as UserRole] || "/dashboard/citizen";
-      redirect(path);
+    email,
+    options: {
+      // Typically you define an email redirect route in Supabase dashboard
+      // e.g. /auth/callback
+      shouldCreateUser: true,
     }
+  });
+
+  if (error) {
+    return { error: error.message };
   }
 
-  redirect("/dashboard/citizen");
+  return { success: "Magic link sent! Check your inbox." };
 }
 
 export async function logout(): Promise<void> {

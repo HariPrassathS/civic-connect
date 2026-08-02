@@ -8,7 +8,7 @@ import type { UserRole } from "@/types/database";
 const PROTECTED_PREFIXES = ["/dashboard", "/admin"];
 
 // Routes that should redirect to dashboard if already authenticated
-const AUTH_ROUTES = ["/login", "/signup"];
+const AUTH_ROUTES = ["/login", "/signup", "/official-login"];
 
 export async function middleware(request: NextRequest) {
   const { response, user } = await updateSession(request);

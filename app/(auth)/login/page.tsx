@@ -360,7 +360,7 @@ export default function LoginPage() {
           </TabsContent>
         </Tabs>
       </CardContent>
-      <CardFooter className="justify-center">
+      <CardFooter className="flex-col gap-4 justify-center">
         <p className="text-sm text-muted-foreground">
           Don&apos;t have an account?{" "}
           <Link
@@ -370,6 +370,15 @@ export default function LoginPage() {
             Sign up
           </Link>
         </p>
+        
+        <div className="w-full border-t border-border/50 pt-4 text-center">
+          <Link
+            href="/official-login"
+            className="text-xs font-semibold tracking-wide text-indigo-400 hover:text-indigo-300 transition-colors"
+          >
+            OFFICIAL PORTAL LOGIN &rarr;
+          </Link>
+        </div>
       </CardFooter>
     </Card>
   );

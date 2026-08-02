@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Shield, LogOut, Plus, MapPin, Users } from "lucide-react";
+import { Shield, LogOut, Plus, MapPin, Users, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { logout } from "@/app/(auth)/actions";
 import { NotificationBell } from "@/components/shared/notification-bell";
@@ -42,6 +42,14 @@ export default function CitizenDashboardLayout({
             >
               <Plus className="h-3.5 w-3.5" />
               <span className="hidden sm:inline">New Issue</span>
+            </Link>
+            
+            <Link
+              href="/dashboard/citizen/profile"
+              className="inline-flex h-7 items-center gap-1.5 rounded-[min(var(--radius-md),12px)] px-2.5 text-[0.8rem] font-medium transition-all hover:bg-muted hover:text-foreground"
+            >
+              <User className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Profile</span>
             </Link>
             
             <NotificationBell />

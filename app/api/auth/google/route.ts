@@ -14,68 +14,57 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Email is required." }, { status: 400 });
     }
 
-    // 1. Check if user already exists in Supabase auth
-    const { data: existingUsers } = await supabaseAdmin.auth.admin.listUsers();
-    const existingUser = existingUsers?.users?.find(
-      (u) => u.email === email
-    );
+    // Strategy: Try to generate a magic link directly.
+    // If the user doesn't exist, create them first, then generate the link.
+    
+    // First, try to create the user (will fail silently if exists)
+    const { data: newUser, error: createError } = await supabaseAdmin.auth.admin.createUser({
+      email,
+      email_confirm: true,
+      user_metadata: {
+        full_name: name || email.split("@")[0],
+        avatar_url: photoURL || "",
+        role: "citizen",
+      },
+    });
 
-    if (existingUser) {
-      // User exists — generate a magic link to log them in
-      const { data, error } = await supabaseAdmin.auth.admin.generateLink({
-        type: "magiclink",
-        email,
-      });
-
-      if (error || !data?.properties?.hashed_token) {
-        console.error("Magic link generation failed:", error);
-        return NextResponse.json({ error: "Failed to generate session." }, { status: 500 });
-      }
-
-      return NextResponse.json({
-        success: true,
-        action: "login",
-        token_hash: data.properties.hashed_token,
-        email,
-      });
-    } else {
-      // New user — create them in Supabase with a random password
-      const randomPassword = crypto.randomUUID() + "Aa1!";
-      
-      const { data: newUser, error: signupError } = await supabaseAdmin.auth.admin.createUser({
-        email,
-        password: randomPassword,
-        email_confirm: true,
-        user_metadata: {
-          full_name: name || email.split("@")[0],
-          avatar_url: photoURL || "",
-          role: "citizen",
-        },
-      });
-
-      if (signupError) {
-        console.error("Supabase user creation failed:", signupError);
-        return NextResponse.json({ error: signupError.message }, { status: 500 });
-      }
-
-      // Generate magic link to log them in immediately
-      const { data, error } = await supabaseAdmin.auth.admin.generateLink({
-        type: "magiclink",
-        email,
-      });
-
-      if (error || !data?.properties?.hashed_token) {
-        console.error("Magic link generation failed:", error);
-        return NextResponse.json({ error: "Account created but login failed." }, { status: 500 });
-      }
-
-      return NextResponse.json({
-        success: true,
-        action: "signup",
-        token_hash: data.properties.hashed_token,
-        email,
-      });
+    // If user already exists, that's fine — we just need the magic link
+    if (createError && !createError.message.includes("already been registered")) {
+      console.error("User creation error:", createError.message);
     }
+
+    // Get the user ID (either new or existing)
+    const { data: userData } = await supabaseAdmin.auth.admin.listUsers();
+    const targetUser = userData?.users?.find((u) => u.email === email);
+
+    // Update the profiles table with Google data
+    if (targetUser) {
+      await supabaseAdmin
+        .from("profiles")
+        .update({
+          full_name: name || email.split("@")[0],
+          email,
+          avatar_url: photoURL || null,
+        })
+        .eq("id", targetUser.id);
+    }
+
+    // Generate magic link for this email
+    const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
+      type: "magiclink",
+      email,
+    });
+
+    if (linkError || !linkData?.properties?.hashed_token) {
+      console.error("Magic link generation failed:", linkError);
+      return NextResponse.json({ error: "Failed to create login session." }, { status: 500 });
+    }
+
+    return NextResponse.json({
+      success: true,
+      token_hash: linkData.properties.hashed_token,
+      email,
+    });
   } catch (error: any) {
     console.error("Google Auth Bridge Error:", error);
     return NextResponse.json({ error: "Internal server error." }, { status: 500 });

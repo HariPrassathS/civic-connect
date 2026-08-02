@@ -59,7 +59,7 @@ export default function LoginPage() {
     setError(null);
     setGoogleLoading(true);
     try {
-      const { auth, googleProvider } = getFirebase();
+      const { auth, googleProvider } = await getFirebase();
       const result = await signInWithPopup(auth, googleProvider);
       const user = result.user;
 

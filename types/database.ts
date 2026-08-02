@@ -34,11 +34,21 @@ export type NotificationChannel = "in_app" | "email" | "sms" | "push";
 export interface Profile {
   id: string;
   full_name: string | null;
+  email: string | null;
   phone: string | null;
+  avatar_url: string | null;
   role: UserRole;
   department_id: string | null;
   ward_id: string | null;
   fcm_token: string | null;
+  address: string | null;
+  district: string | null;
+  area: string | null;
+  city: string | null;
+  state: string | null;
+  pincode: string | null;
+  lat: number | null;
+  lng: number | null;
   created_at: string;
 }
 

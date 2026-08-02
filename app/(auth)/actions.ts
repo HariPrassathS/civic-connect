@@ -103,12 +103,16 @@ export async function sendMagicLink(formData: FormData): Promise<AuthResult> {
     return { error: "Email is required." };
   }
 
+  // Get the origin from headers for the redirect URL
+  const { headers } = await import("next/headers");
+  const headersList = await headers();
+  const origin = headersList.get("origin") || headersList.get("referer")?.split("/").slice(0, 3).join("/") || "http://localhost:3000";
+
   const { error } = await supabase.auth.signInWithOtp({
     email,
     options: {
-      // Typically you define an email redirect route in Supabase dashboard
-      // e.g. /auth/callback
       shouldCreateUser: true,
+      emailRedirectTo: `${origin}/auth/callback`,
     }
   });
 

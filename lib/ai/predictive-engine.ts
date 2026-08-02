@@ -1,5 +1,4 @@
 import { SupabaseClient } from "@supabase/supabase-js";
-import { getGroqClient } from "./provider";
 
 export async function generatePredictiveAlerts(supabase: SupabaseClient) {
   console.log("Fetching historical complaint data for predictive analysis...");
@@ -40,13 +39,24 @@ export async function generatePredictiveAlerts(supabase: SupabaseClient) {
   
   // 3. Feed to Groq LLM
   console.log("Analyzing patterns using Groq AI...");
-  const groq = getGroqClient();
+  const groqKey = process.env.GROQ_API_KEY;
+  if (!groqKey) {
+    console.error("No GROQ_API_KEY found, skipping predictive analysis.");
+    return [];
+  }
   
-  const completion = await groq.chat.completions.create({
-    messages: [
-      {
-        role: "system",
-        content: `You are a Smart City Predictive Maintenance AI.
+  const completion = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${groqKey}`,
+    },
+    body: JSON.stringify({
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        {
+          role: "system",
+          content: `You are a Smart City Predictive Maintenance AI.
 You receive a JSON payload of complaint aggregations by ward for the last 30 days.
 Your job is to identify patterns and output exactly 1 to 3 predictive alerts.
 For example, if a ward has multiple minor water leaks, predict a high risk of a main pipe burst.
@@ -64,17 +74,19 @@ Format:
     "recommended_action": "String"
   }
 ]`
-      },
-      {
-        role: "user",
-        content: analysisPayload
-      }
-    ],
-    model: "llama3-8b-8192", // Fast model for JSON
-    temperature: 0.2,
+        },
+        {
+          role: "user",
+          content: analysisPayload
+        }
+      ],
+      temperature: 0.2,
+    })
   });
 
-  const responseText = completion.choices[0]?.message?.content || "[]";
+  const responseJson = await completion.json();
+  const responseText = responseJson?.choices?.[0]?.message?.content || "[]";
+  
   let predictions = [];
   try {
     predictions = JSON.parse(responseText);

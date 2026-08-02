@@ -196,9 +196,8 @@ export default async function ComplaintDetailPage({ params }: Props) {
         {complaint.visibility === "public" && (
           <UpvoteButton
             complaintId={complaint.id}
-            initialCount={upvoteCount ?? 0}
-            initialUpvoted={!!userUpvote}
-            userId={user.id}
+            initialUpvotes={upvoteCount ?? 0}
+            initiallyUpvoted={!!userUpvote}
           />
         )}
         {isOwner && complaint.status === "closed" && (

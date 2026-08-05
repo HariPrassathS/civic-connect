@@ -4,8 +4,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
-  Mic, Camera, Check, RotateCcw, Loader2, Volume2, X,
-  ChevronRight, Phone, MapPin, MessageSquare, Send, CheckCircle2,
+  Mic, Camera, Check, RotateCcw, Loader2, Volume2, X, CheckCircle2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useVoiceEngine } from "@/lib/voice/use-voice-engine";
@@ -20,7 +19,7 @@ import {
   isDenial,
 } from "@/lib/voice/conversation-machine";
 
-// ─── Step metadata for progress bar ───────────────────────────
+// ─── Step metadata ────────────────────────────────────────────
 const STEPS_ORDER: ConversationStep[] = [
   "GREETING", "LANGUAGE", "NAME", "PHONE", "LOCATION",
   "COMPLAINT", "PHOTO", "CONFIRM", "SUBMITTING", "DONE",
@@ -39,31 +38,23 @@ const STEP_LABELS: Record<string, { icon: string; label: string }> = {
   ERROR: { icon: "❌", label: "Error" },
 };
 
-// ─── Retry wrapper: re-asks if user says nothing ──────────────
-async function listenWithRetry(
-  listenFn: (lang: string, timeout?: number) => Promise<string>,
-  speakFn: (text: string, lang: string) => Promise<void>,
-  lang: Language,
-  retryPrompt: string,
-  maxRetries: number = 2,
-  timeoutMs: number = 10000
-): Promise<string> {
-  const speechLang = lang === "ta" ? "ta-IN" : "en-IN";
-  let attempts = 0;
+/**
+ * ANTI-ECHO DELAY: Wait this long after TTS finishes before starting STT.
+ * This prevents the mic from picking up the speaker's output.
+ * 1.5 seconds is safe for most devices.
+ */
+const ANTI_ECHO_DELAY = 1500;
 
-  while (attempts <= maxRetries) {
-    const result = await listenFn(speechLang, timeoutMs);
-    if (result && result.trim().length > 0) {
-      return result.trim();
-    }
-    attempts++;
-    if (attempts <= maxRetries) {
-      await speakFn(retryPrompt, speechLang);
-      await new Promise((r) => setTimeout(r, 400));
-    }
-  }
-  return ""; // Give up after retries
-}
+/**
+ * How long to wait for user speech before giving up (ms).
+ * Elders need more time to think and respond.
+ */
+const LISTEN_TIMEOUT = 12000;
+
+/**
+ * Safe wait helper
+ */
+const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 export default function VoiceAssistantPage() {
   const router = useRouter();
@@ -77,7 +68,7 @@ export default function VoiceAssistantPage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [complaintId, setComplaintId] = useState<string | null>(null);
   const [started, setStarted] = useState(false);
-  const [conversationLog, setConversationLog] = useState<
+  const [chatLog, setChatLog] = useState<
     { role: "assistant" | "citizen"; text: string }[]
   >([]);
 
@@ -86,12 +77,12 @@ export default function VoiceAssistantPage() {
   const photoResolveRef = useRef<(() => void) | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll chat
+  // Auto-scroll
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [conversationLog, assistantText, citizenText]);
+  }, [chatLog, assistantText, citizenText, interimText]);
 
-  // Load voices on mount
+  // Load voices
   useEffect(() => {
     if (typeof window !== "undefined" && window.speechSynthesis) {
       window.speechSynthesis.getVoices();
@@ -100,98 +91,165 @@ export default function VoiceAssistantPage() {
     }
   }, []);
 
-  // ─── Helpers ────────────────────────────────────────────────
-  const addLog = useCallback(
+  // ─── Chat log helper ───────────────────────────────────────
+  const log = useCallback(
     (role: "assistant" | "citizen", text: string) => {
       if (!text) return;
-      setConversationLog((prev) => [...prev, { role, text }]);
+      setChatLog((prev) => [...prev, { role, text }]);
     },
     []
   );
 
-  const speakAndLog = useCallback(
-    async (text: string, lang: Language) => {
-      setAssistantText(text);
-      setCitizenText("");
-      addLog("assistant", text);
-      const speechLang = lang === "ta" ? "ta-IN" : "en-IN";
-      await speak(text, speechLang);
-      await new Promise((r) => setTimeout(r, 400));
-    },
-    [speak, addLog]
-  );
-
-  const speakListenLog = useCallback(
+  // ─── CORE: Speak → wait (anti-echo) → Listen ──────────────
+  // This is the critical function. The long gap prevents self-hearing.
+  const askAndListen = useCallback(
     async (
-      text: string,
+      prompt: string,
       lang: Language,
-      retryMsg?: string,
-      timeout?: number
+      timeout: number = LISTEN_TIMEOUT
     ): Promise<string> => {
-      await speakAndLog(text, lang);
-      const retry =
-        retryMsg ||
-        (lang === "ta"
-          ? "மன்னிக்கவும், கேட்கவில்லை. மீண்டும் சொல்லுங்கள்."
-          : "Sorry, I didn't catch that. Please say it again.");
-      const response = await listenWithRetry(listen, speak, lang, retry, 2, timeout || 10000);
-      setCitizenText(response);
-      if (response) addLog("citizen", response);
-      return response;
+      const speechLang = lang === "ta" ? "ta-IN" : "en-IN";
+
+      // 1. Show & speak the prompt
+      setAssistantText(prompt);
+      setCitizenText("");
+      log("assistant", prompt);
+      await speak(prompt, speechLang);
+
+      // 2. ANTI-ECHO GAP — critical! Wait for speaker to fully stop
+      await wait(ANTI_ECHO_DELAY);
+
+      // 3. Now listen
+      const result = await listen(speechLang, timeout);
+      const cleaned = result.trim();
+      setCitizenText(cleaned);
+      if (cleaned) log("citizen", cleaned);
+
+      return cleaned;
     },
-    [speakAndLog, listen, speak, addLog]
+    [speak, listen, log]
   );
 
-  // ─── Haptic feedback ───────────────────────────────────────
-  const vibrate = useCallback((pattern: number | number[]) => {
-    if (typeof navigator !== "undefined" && navigator.vibrate) {
-      navigator.vibrate(pattern);
-    }
+  // ─── Speak-only (no listen after) ──────────────────────────
+  const sayOnly = useCallback(
+    async (text: string, lang: Language) => {
+      const speechLang = lang === "ta" ? "ta-IN" : "en-IN";
+      setAssistantText(text);
+      log("assistant", text);
+      await speak(text, speechLang);
+      await wait(500); // small pause after
+    },
+    [speak, log]
+  );
+
+  // ─── Ask with retry (up to 2 retries on empty) ─────────────
+  const askWithRetry = useCallback(
+    async (
+      prompt: string,
+      retryPrompt: string,
+      lang: Language,
+      timeout: number = LISTEN_TIMEOUT,
+      maxRetries: number = 2
+    ): Promise<string> => {
+      // First attempt
+      let result = await askAndListen(prompt, lang, timeout);
+      if (result) return result;
+
+      // Retries
+      for (let i = 0; i < maxRetries; i++) {
+        result = await askAndListen(retryPrompt, lang, timeout);
+        if (result) return result;
+      }
+      return "";
+    },
+    [askAndListen]
+  );
+
+  // ─── Vibrate helper ────────────────────────────────────────
+  const vibrate = useCallback((p: number | number[]) => {
+    try { navigator?.vibrate?.(p); } catch {}
   }, []);
 
-  // ─── Location Detection ─────────────────────────────────────
-  const detectLocation = useCallback(
-    (): Promise<{ lat: number; lng: number }> => {
-      return new Promise((resolve) => {
-        if (!navigator.geolocation) {
-          resolve({ lat: 0, lng: 0 });
-          return;
-        }
-        navigator.geolocation.getCurrentPosition(
-          (pos) =>
-            resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-          () => resolve({ lat: 0, lng: 0 }),
-          { enableHighAccuracy: true, timeout: 15000 }
-        );
-      });
-    },
-    []
-  );
+  // ─── Location (CRASH-PROOF) ────────────────────────────────
+  const safeGetLocation = useCallback(async (): Promise<{
+    lat: number;
+    lng: number;
+    address: string;
+    district: string;
+    area: string;
+  }> => {
+    const fallback = { lat: 0, lng: 0, address: "", district: "", area: "" };
 
-  const reverseGeocode = useCallback(async (lat: number, lng: number) => {
     try {
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=16&addressdetails=1`,
-        { headers: { "User-Agent": "CivicConnectTN/1.0" } }
+      // Check if geolocation is available
+      if (typeof navigator === "undefined" || !navigator.geolocation) {
+        return fallback;
+      }
+
+      // Get coordinates with timeout
+      const coords = await new Promise<{ lat: number; lng: number }>(
+        (resolve) => {
+          const timer = setTimeout(() => resolve({ lat: 0, lng: 0 }), 10000);
+          navigator.geolocation.getCurrentPosition(
+            (pos) => {
+              clearTimeout(timer);
+              resolve({
+                lat: pos.coords.latitude,
+                lng: pos.coords.longitude,
+              });
+            },
+            () => {
+              clearTimeout(timer);
+              resolve({ lat: 0, lng: 0 });
+            },
+            { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 }
+          );
+        }
       );
-      const geo = await res.json();
-      return {
-        address: geo.display_name || "",
-        district:
-          geo.address?.state_district || geo.address?.county || "",
-        area:
-          geo.address?.suburb ||
-          geo.address?.neighbourhood ||
-          geo.address?.village ||
-          "",
-        city: geo.address?.city || geo.address?.town || "",
-      };
+
+      if (coords.lat === 0 && coords.lng === 0) {
+        return fallback;
+      }
+
+      // Reverse geocode with timeout
+      try {
+        const controller = new AbortController();
+        const geoTimer = setTimeout(() => controller.abort(), 5000);
+
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/reverse?format=json&lat=${coords.lat}&lon=${coords.lng}&zoom=16&addressdetails=1`,
+          {
+            headers: { "User-Agent": "CivicConnectTN/1.0" },
+            signal: controller.signal,
+          }
+        );
+        clearTimeout(geoTimer);
+
+        const geo = await res.json();
+        return {
+          lat: coords.lat,
+          lng: coords.lng,
+          address: geo.display_name || "",
+          district:
+            geo.address?.state_district || geo.address?.county || "",
+          area:
+            geo.address?.suburb ||
+            geo.address?.neighbourhood ||
+            geo.address?.village ||
+            "",
+        };
+      } catch {
+        // Geocode failed but we have coordinates
+        return { ...coords, address: "", district: "", area: "" };
+      }
     } catch {
-      return { address: "", district: "", area: "", city: "" };
+      return fallback;
     }
   }, []);
 
-  // ─── Main Conversation ─────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════
+  // MAIN CONVERSATION — Each step is wrapped in try-catch
+  // ═══════════════════════════════════════════════════════════
   const runConversation = useCallback(async () => {
     if (isRunningRef.current) return;
     isRunningRef.current = true;
@@ -201,144 +259,177 @@ export default function VoiceAssistantPage() {
     let d = { ...INITIAL_DATA };
     let lang: Language = "ta";
 
+    // ── STEP 1: GREETING + LANGUAGE ─────────────────────────
     try {
-      // ── 1. GREETING ──
       setStep("GREETING");
-      const langInput = await speakListenLog(
-        "வணக்கம்! நான் சிவிக் கனெக்ட் உதவியாளர். உங்கள் பிரச்சனையை சொல்லுங்கள், நான் உதவுகிறேன். தமிழில் பேசலாமா, English-ல் பேசலாமா?",
+      const langInput = await askWithRetry(
+        "வணக்கம்! நான் சிவிக் கனெக்ட் உதவியாளர். உங்கள் பிரச்சனையை பதிவு செய்ய நான் உதவுகிறேன். தமிழில் பேசலாமா, English-ல பேசலாமா?",
+        "Tamil-ல பேசணுமா? English-ல பேசணுமா? சொல்லுங்கள்.",
         "ta",
-        "Tamil-ல் பேசணுமா, English-ல் பேசணுமா? சொல்லுங்கள்.",
-        12000
+        12000,
+        1
       );
       lang = detectLanguageChoice(langInput);
       d.language = lang;
       setData({ ...d });
+    } catch (e) {
+      console.error("Step GREETING failed:", e);
+      lang = "ta";
+      d.language = lang;
+    }
 
-      // ── 2. NAME ──
-      setStep("LANGUAGE");
-      const confirmLangMsg =
+    // ── STEP 2: NAME ────────────────────────────────────────
+    try {
+      setStep("NAME");
+      const namePrompt =
         lang === "ta"
           ? "சரி, தமிழில் பேசலாம்! உங்கள் பெயர் என்ன?"
-          : "Great, let's speak in English! What is your name?";
-      const nameInput = await speakListenLog(
-        confirmLangMsg,
-        lang,
+          : "Great! What is your name?";
+      const retryName =
         lang === "ta"
           ? "உங்கள் பெயர் சொல்லுங்கள்."
-          : "Please tell me your name."
-      );
+          : "Please tell me your name.";
+      const nameInput = await askWithRetry(namePrompt, retryName, lang);
       d.name = nameInput || "Citizen";
       setData({ ...d });
+    } catch (e) {
+      console.error("Step NAME failed:", e);
+      d.name = "Citizen";
+    }
 
-      // ── 3. PHONE ──
-      setStep("NAME");
+    // ── STEP 3: PHONE ───────────────────────────────────────
+    try {
+      setStep("PHONE");
       const phonePrompt =
         lang === "ta"
           ? `${d.name}, நன்றி! உங்கள் மொபைல் நம்பர் சொல்லுங்கள்.`
           : `Thank you ${d.name}! Please tell me your mobile number.`;
-      const phoneInput = await speakListenLog(
-        phonePrompt,
-        lang,
+      const retryPhone =
         lang === "ta"
-          ? "உங்கள் 10 இலக்க மொபைல் நம்பர் சொல்லுங்கள்."
-          : "Please say your 10-digit mobile number.",
-        12000
-      );
+          ? "உங்கள் 10 இலக்க போன் நம்பர் மெதுவாக சொல்லுங்கள்."
+          : "Please say your 10-digit phone number slowly.";
+      const phoneInput = await askWithRetry(phonePrompt, retryPhone, lang, 15000);
       d.phone = extractPhone(phoneInput);
       setData({ ...d });
 
-      // Confirm phone
-      if (d.phone && d.phone.length === 10) {
-        const phoneConfirm =
+      // Confirm phone if we got 10 digits
+      if (d.phone.length === 10) {
+        const spaced = d.phone.split("").join(", ");
+        const phoneCheck =
           lang === "ta"
-            ? `உங்கள் நம்பர் ${d.phone.split("").join(" ")}. சரியா?`
-            : `Your number is ${d.phone.split("").join(" ")}. Is that correct?`;
-        const phoneOk = await speakListenLog(phoneConfirm, lang);
-        if (isDenial(phoneOk)) {
-          const retryPhone = await speakListenLog(
+            ? `உங்கள் நம்பர்: ${spaced}. சரியா?`
+            : `Your number: ${spaced}. Is that correct?`;
+        const confirmResp = await askAndListen(phoneCheck, lang, 8000);
+        if (isDenial(confirmResp)) {
+          const redo = await askAndListen(
             lang === "ta"
-              ? "சரி, மீண்டும் சொல்லுங்கள்."
-              : "Okay, please say it again.",
+              ? "சரி, மீண்டும் மெதுவாக சொல்லுங்கள்."
+              : "Okay, please say it again slowly.",
             lang,
-            undefined,
-            12000
+            15000
           );
-          d.phone = extractPhone(retryPhone);
+          d.phone = extractPhone(redo);
           setData({ ...d });
         }
       }
+    } catch (e) {
+      console.error("Step PHONE failed:", e);
+    }
 
-      // ── 4. LOCATION ──
-      setStep("PHONE");
-      await speakAndLog(
+    // ── STEP 4: LOCATION (CRASH-PROOF) ──────────────────────
+    try {
+      setStep("LOCATION");
+      await sayOnly(
         lang === "ta"
-          ? "சரி. உங்கள் இருப்பிடம் கண்டுபிடிக்கிறேன்... ஒரு நிமிடம்."
-          : "Got it. Detecting your location... One moment.",
+          ? "சரி. உங்கள் இருப்பிடம் கண்டுபிடிக்கிறேன்..."
+          : "Okay. Detecting your location...",
         lang
       );
 
       setIsProcessing(true);
-      vibrate(50);
-      const coords = await detectLocation();
-      d.lat = coords.lat;
-      d.lng = coords.lng;
-
-      if (coords.lat !== 0) {
-        const geo = await reverseGeocode(coords.lat, coords.lng);
-        d.address = geo.address;
-        d.district = geo.district;
-        d.area = geo.area;
-      }
+      const loc = await safeGetLocation();
+      d.lat = loc.lat;
+      d.lng = loc.lng;
+      d.address = loc.address;
+      d.district = loc.district;
+      d.area = loc.area;
       setData({ ...d });
       setIsProcessing(false);
-      setStep("LOCATION");
 
-      // ── 5. COMPLAINT (LONG LISTEN) ──
-      const locationMsg = d.area
-        ? lang === "ta"
-          ? `உங்கள் இருப்பிடம் ${d.area}${d.district ? `, ${d.district}` : ""} என்று கண்டறியப்பட்டது. இப்போது என்ன பிரச்சனை இருக்கு? விரிவாக சொல்லுங்கள்.`
-          : `Your location is ${d.area}${d.district ? `, ${d.district}` : ""}. Now tell me, what is the problem? Please describe in detail.`
-        : lang === "ta"
-          ? "இருப்பிடம் கிடைக்கவில்லை, ஆனால் பரவாயில்லை. என்ன பிரச்சனை இருக்கு? விரிவாக சொல்லுங்கள்."
-          : "Could not detect location, but that's okay. What is the problem? Please describe in detail.";
-
-      const complaintInput = await speakListenLog(
-        locationMsg,
-        lang,
+      if (loc.area) {
+        await sayOnly(
+          lang === "ta"
+            ? `உங்கள் இருப்பிடம்: ${loc.area}${loc.district ? `, ${loc.district}` : ""}. `
+            : `Your location: ${loc.area}${loc.district ? `, ${loc.district}` : ""}. `,
+          lang
+        );
+      } else if (loc.lat !== 0) {
+        await sayOnly(
+          lang === "ta"
+            ? "இருப்பிடம் கிடைத்தது."
+            : "Location detected.",
+          lang
+        );
+      } else {
+        // Location failed — ask user manually
+        const manualLoc = await askAndListen(
+          lang === "ta"
+            ? "இருப்பிடம் கண்டறிய இயலவில்லை. உங்கள் ஏரியா பெயர் சொல்லுங்கள்."
+            : "Could not detect location. Please tell me your area name.",
+          lang,
+          10000
+        );
+        if (manualLoc) {
+          d.area = manualLoc;
+          d.address = manualLoc;
+          setData({ ...d });
+        }
+      }
+    } catch (e) {
+      console.error("Step LOCATION failed:", e);
+      setIsProcessing(false);
+      // Don't crash — continue without location
+      await sayOnly(
         lang === "ta"
-          ? "பிரச்சனையை சொல்லுங்கள். உதாரணமாக: ரோட்ல குழி இருக்கு, தண்ணி வரலை, குப்பை அள்ளலை."
-          : "Please describe the problem. For example: pothole on road, no water supply, garbage not collected.",
-        15000
+          ? "இருப்பிடம் பெற இயலவில்லை, ஆனால் பரவாயில்லை. தொடர்கிறேன்."
+          : "Could not get location, but that's fine. Continuing.",
+        lang
       );
-      d.complaintText = complaintInput;
+    }
+
+    // ── STEP 5: COMPLAINT ───────────────────────────────────
+    try {
+      setStep("COMPLAINT");
+      const complaintPrompt =
+        lang === "ta"
+          ? "இப்போது என்ன பிரச்சனை இருக்கு? விரிவாக சொல்லுங்கள், நான் குறிப்பு எடுக்கிறேன்."
+          : "Now, what is the problem? Please describe it in detail, I will note it down.";
+      const retryComplaint =
+        lang === "ta"
+          ? "பிரச்சனையை சொல்லுங்கள். உதாரணம்: ரோட்ல குழி, தண்ணி வரலை, குப்பை."
+          : "Please describe the problem. Example: pothole on road, no water, garbage.";
+      const complaintInput = await askWithRetry(
+        complaintPrompt,
+        retryComplaint,
+        lang,
+        15000,
+        2
+      );
+
+      d.complaintText = complaintInput || "Civic issue reported via voice";
       setData({ ...d });
 
-      // If complaint is empty, try one more time with examples
-      if (!complaintInput) {
-        const retryComplaint = await speakListenLog(
-          lang === "ta"
-            ? "பிரச்சனையை சொல்ல முடியவில்லை. டைப் செய்து கொடுங்கள் அல்லது மீண்டும் பேசுங்கள்."
-            : "I couldn't hear the problem. Please try speaking again or tap Restart.",
-          lang,
-          undefined,
-          15000
-        );
-        d.complaintText = retryComplaint || "Civic issue reported via voice";
-        setData({ ...d });
-      }
-
-      // ── 6. AI EXTRACTION ──
-      setStep("COMPLAINT");
+      // AI Extraction
       setIsProcessing(true);
-      await speakAndLog(
+      await sayOnly(
         lang === "ta"
-          ? "புரிகிறது. உங்கள் புகாரை பகுப்பாய்வு செய்கிறேன்..."
-          : "I understand. Analyzing your complaint...",
+          ? "புரிகிறது. பகுப்பாய்வு செய்கிறேன்..."
+          : "Understood. Analyzing...",
         lang
       );
 
       try {
-        const extractRes = await fetch("/api/voice/extract", {
+        const res = await fetch("/api/voice/extract", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -347,11 +438,11 @@ export default function VoiceAssistantPage() {
             location: d.area || d.district || "",
           }),
         });
-        const extracted = await extractRes.json();
-        d.issueType = extracted.issue_type || "other";
-        d.title = extracted.title || "Voice Complaint";
-        d.description = extracted.description || d.complaintText;
-        d.urgency = extracted.urgency || "medium";
+        const ex = await res.json();
+        d.issueType = ex.issue_type || "other";
+        d.title = ex.title || "Voice Complaint";
+        d.description = ex.description || d.complaintText;
+        d.urgency = ex.urgency || "medium";
       } catch {
         d.issueType = "other";
         d.title = "Voice Complaint";
@@ -360,133 +451,149 @@ export default function VoiceAssistantPage() {
       setData({ ...d });
       setIsProcessing(false);
 
-      // Read back the understanding
-      const understandMsg =
+      // Confirm understanding
+      const confirmUnderstand =
         lang === "ta"
-          ? `புரிந்தது: "${d.title}". வகை: ${d.issueType}. இது சரியா?`
-          : `I understood: "${d.title}". Category: ${d.issueType}. Is this correct?`;
-      const understandOk = await speakListenLog(understandMsg, lang);
-      if (isDenial(understandOk)) {
-        // Let user re-describe
-        const redescribe = await speakListenLog(
+          ? `நான் புரிந்தது: "${d.title}". சரியா?`
+          : `I understood: "${d.title}". Is that correct?`;
+      const ok = await askAndListen(confirmUnderstand, lang, 8000);
+
+      if (isDenial(ok)) {
+        const redo = await askAndListen(
           lang === "ta"
             ? "சரி, மீண்டும் விரிவாக சொல்லுங்கள்."
-            : "Okay, please describe the problem again in more detail.",
+            : "Okay, please describe again in detail.",
           lang,
-          undefined,
           15000
         );
-        if (redescribe) {
-          d.complaintText = redescribe;
-          setData({ ...d });
-          // Re-extract
+        if (redo) {
+          d.complaintText = redo;
           setIsProcessing(true);
           try {
-            const re = await fetch("/api/voice/extract", {
+            const r2 = await fetch("/api/voice/extract", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                transcript: redescribe,
+                transcript: redo,
                 language: lang,
-                location: d.area || d.district || "",
+                location: d.area || "",
               }),
             });
-            const rx = await re.json();
-            d.issueType = rx.issue_type || d.issueType;
-            d.title = rx.title || d.title;
-            d.description = rx.description || redescribe;
-            d.urgency = rx.urgency || d.urgency;
+            const e2 = await r2.json();
+            d.issueType = e2.issue_type || d.issueType;
+            d.title = e2.title || d.title;
+            d.description = e2.description || redo;
+            d.urgency = e2.urgency || d.urgency;
           } catch {}
           setData({ ...d });
           setIsProcessing(false);
         }
       }
+    } catch (e) {
+      console.error("Step COMPLAINT failed:", e);
+      setIsProcessing(false);
+    }
 
-      // ── 7. PHOTO ──
+    // ── STEP 6: PHOTO ───────────────────────────────────────
+    try {
       setStep("PHOTO");
-      const photoAsk =
+      const photoResp = await askAndListen(
         lang === "ta"
-          ? "பிரச்சனையின் போட்டோ எடுக்க முடியுமா? கேமரா பட்டனை தட்டுங்கள். வேண்டாம் என்றால் 'வேண்டாம்' என்று சொல்லுங்கள்."
-          : "Can you take a photo of the problem? Tap the camera button below. Say 'no' if you don't want to.";
-      const photoResp = await speakListenLog(photoAsk, lang);
+          ? "பிரச்சனையின் போட்டோ எடுக்க முடியுமா? 'ஆமா' அல்லது 'வேண்டாம்' என்று சொல்லுங்கள்."
+          : "Can you take a photo of the problem? Say 'yes' or 'no'.",
+        lang,
+        8000
+      );
 
       if (!isDenial(photoResp)) {
-        await speakAndLog(
+        await sayOnly(
           lang === "ta"
-            ? "கீழே உள்ள கேமரா பட்டனை தட்டி போட்டோ எடுங்கள். எடுத்த பிறகு நான் தொடர்வேன்."
-            : "Tap the camera button below to take a photo. I will continue after you take it.",
+            ? "கீழே கேமரா பட்டனை தட்டுங்கள். போட்டோ எடுத்தபின் நான் தொடர்வேன்."
+            : "Tap the camera button below. I will continue after you take the photo.",
           lang
         );
 
-        // Event-driven photo wait — resolves when photo is captured or timeout
+        // Event-driven: wait for photo or 25s timeout
         await new Promise<void>((resolve) => {
           photoResolveRef.current = resolve;
-          // Auto-open camera
-          setTimeout(() => cameraInputRef.current?.click(), 800);
-          // Safety timeout: 30 seconds
+          setTimeout(() => cameraInputRef.current?.click(), 1000);
           setTimeout(() => {
             photoResolveRef.current = null;
             resolve();
-          }, 30000);
+          }, 25000);
         });
 
         if (d.photoPreview) {
-          await speakAndLog(
-            lang === "ta" ? "போட்டோ எடுக்கப்பட்டது! நன்றி." : "Photo captured! Thank you.",
+          await sayOnly(
+            lang === "ta" ? "போட்டோ சேர்க்கப்பட்டது!" : "Photo added!",
             lang
           );
         }
       } else {
-        await speakAndLog(
+        await sayOnly(
           lang === "ta"
-            ? "சரி, போட்டோ இல்லாமலேயே தொடர்கிறேன்."
-            : "Okay, continuing without a photo.",
+            ? "சரி, போட்டோ இல்லாமல் தொடர்கிறேன்."
+            : "Okay, continuing without photo.",
           lang
         );
       }
+    } catch (e) {
+      console.error("Step PHOTO failed:", e);
+    }
 
-      // ── 8. CONFIRM ──
+    // ── STEP 7: CONFIRM ─────────────────────────────────────
+    try {
       setStep("CONFIRM");
       vibrate([50, 100, 50]);
-      const summaryParts = [
-        lang === "ta" ? "உங்கள் புகார் சுருக்கம்:" : "Your complaint summary:",
-        `• ${lang === "ta" ? "பெயர்" : "Name"}: ${d.name}`,
-        `• ${lang === "ta" ? "பிரச்சனை" : "Issue"}: ${d.title}`,
-        d.area ? `• ${lang === "ta" ? "இடம்" : "Location"}: ${d.area}` : "",
-        `• ${lang === "ta" ? "அவசரம்" : "Urgency"}: ${d.urgency}`,
-        d.photoPreview
-          ? `• ${lang === "ta" ? "போட்டோ" : "Photo"}: ✅`
-          : "",
-        "",
+
+      const summary =
         lang === "ta"
-          ? "சமர்ப்பிக்கவா? 'ஆமா' என்று சொல்லுங்கள்."
-          : "Shall I submit? Say 'yes' to confirm.",
-      ]
-        .filter(Boolean)
-        .join("\n");
+          ? `உங்கள் புகார் தயார். பெயர்: ${d.name}. பிரச்சனை: ${d.title}. ${d.area ? `இடம்: ${d.area}. ` : ""}சமர்ப்பிக்கவா? ஆமா என்று சொல்லுங்கள்.`
+          : `Your complaint is ready. Name: ${d.name}. Issue: ${d.title}. ${d.area ? `Location: ${d.area}. ` : ""}Shall I submit? Say yes.`;
 
-      const confirmResp = await speakListenLog(
-        summaryParts.replace(/\n/g, ". "), // TTS reads periods better
-        lang
-      );
+      const confirm = await askAndListen(summary, lang, 10000);
 
-      if (!isConfirmation(confirmResp)) {
-        await speakAndLog(
+      if (!isConfirmation(confirm) && confirm !== "") {
+        // They said something that's not yes — check if it's explicitly no
+        if (isDenial(confirm)) {
+          await sayOnly(
+            lang === "ta"
+              ? "சரி, ரத்து செய்கிறேன்."
+              : "Okay, cancelling.",
+            lang
+          );
+          isRunningRef.current = false;
+          return;
+        }
+        // Ambiguous — ask one more time
+        const retryConfirm = await askAndListen(
           lang === "ta"
-            ? "சரி, ரத்து செய்கிறேன். மீண்டும் முயற்சிக்க 'Restart' அழுத்துங்கள்."
-            : "Okay, cancelled. Tap 'Restart' to try again.",
-          lang
+            ? "சமர்ப்பிக்கணுமா? ஆமா அல்லது வேண்டாம் சொல்லுங்கள்."
+            : "Should I submit? Say yes or no.",
+          lang,
+          8000
         );
-        isRunningRef.current = false;
-        return;
+        if (!isConfirmation(retryConfirm)) {
+          await sayOnly(
+            lang === "ta" ? "சரி, ரத்து செய்கிறேன்." : "Okay, cancelling.",
+            lang
+          );
+          isRunningRef.current = false;
+          return;
+        }
       }
+      // Empty response = treat as yes (elder might have just nodded)
+    } catch (e) {
+      console.error("Step CONFIRM failed:", e);
+    }
 
-      // ── 9. SUBMIT ──
+    // ── STEP 8: SUBMIT ──────────────────────────────────────
+    try {
       setStep("SUBMITTING");
-      await speakAndLog(
+      await sayOnly(
         lang === "ta"
-          ? "உங்கள் புகார் சமர்ப்பிக்கப்படுகிறது..."
-          : "Submitting your complaint...",
+          ? "சமர்ப்பிக்கிறேன்... ஒரு நிமிடம்."
+          : "Submitting... One moment.",
         lang
       );
       setIsProcessing(true);
@@ -513,65 +620,50 @@ export default function VoiceAssistantPage() {
       const result = await submitRes.json();
       setIsProcessing(false);
 
-      // ── 10. DONE ──
       if (result.success) {
         setComplaintId(result.complaintId);
         setStep("DONE");
         vibrate([100, 50, 100, 50, 200]);
-        const shortId = result.complaintId?.slice(0, 8) || "N/A";
-        await speakAndLog(
+        const shortId = result.complaintId?.slice(0, 8) || "";
+        await sayOnly(
           lang === "ta"
-            ? `உங்கள் புகார் வெற்றிகரமாக பதிவு செய்யப்பட்டது! புகார் எண்: ${shortId}. நாங்கள் 48 மணி நேரத்தில் தீர்க்க முயற்சிப்போம். நன்றி, ${d.name}!`
-            : `Your complaint has been registered successfully! Complaint ID: ${shortId}. We will try to resolve it within 48 hours. Thank you, ${d.name}!`,
+            ? `வெற்றி! உங்கள் புகார் பதிவு செய்யப்பட்டது. எண்: ${shortId}. 48 மணி நேரத்தில் நடவடிக்கை எடுப்போம். நன்றி ${d.name}!`
+            : `Success! Your complaint is registered. ID: ${shortId}. We will act within 48 hours. Thank you ${d.name}!`,
           lang
         );
       } else {
         setStep("ERROR");
-        await speakAndLog(
+        await sayOnly(
           lang === "ta"
-            ? "மன்னிக்கவும், பதிவு செய்ய இயலவில்லை. மீண்டும் முயற்சிக்கவும்."
+            ? "மன்னிக்கவும், சமர்ப்பிக்க இயலவில்லை. மீண்டும் முயற்சிக்கவும்."
             : "Sorry, submission failed. Please try again.",
           lang
         );
       }
-    } catch (error) {
-      console.error("Conversation error:", error);
+    } catch (e) {
+      console.error("Step SUBMIT failed:", e);
+      setIsProcessing(false);
       setStep("ERROR");
-      setAssistantText(
-        data.language === "ta"
+      await sayOnly(
+        lang === "ta"
           ? "ஒரு பிழை ஏற்பட்டது. மீண்டும் முயற்சிக்கவும்."
-          : "An error occurred. Please try again."
+          : "An error occurred. Please try again.",
+        lang
       );
     }
 
     isRunningRef.current = false;
-  }, [
-    speakListenLog,
-    speakAndLog,
-    listen,
-    speak,
-    detectLocation,
-    reverseGeocode,
-    vibrate,
-    addLog,
-    data.language,
-  ]);
+  }, [askAndListen, askWithRetry, sayOnly, safeGetLocation, vibrate, listen, speak]);
 
-  // ─── Photo Handler (event-driven) ──────────────────────────
+  // ─── Photo handler (event-driven) ─────────────────────────
   function handlePhotoCapture(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-
     const reader = new FileReader();
     reader.onload = () => {
       const preview = reader.result as string;
-      setData((prev) => ({
-        ...prev,
-        photoFile: file,
-        photoPreview: preview,
-      }));
+      setData((prev) => ({ ...prev, photoFile: file, photoPreview: preview }));
       vibrate(100);
-      // Resolve the photo wait promise
       if (photoResolveRef.current) {
         photoResolveRef.current();
         photoResolveRef.current = null;
@@ -580,7 +672,7 @@ export default function VoiceAssistantPage() {
     reader.readAsDataURL(file);
   }
 
-  // ─── Restart ───────────────────────────────────────────────
+  // ─── Restart ──────────────────────────────────────────────
   function handleRestart() {
     stopAll();
     isRunningRef.current = false;
@@ -591,15 +683,19 @@ export default function VoiceAssistantPage() {
     setCitizenText("");
     setComplaintId(null);
     setIsProcessing(false);
-    setConversationLog([]);
+    setChatLog([]);
     photoResolveRef.current = null;
   }
 
-  // ─── Progress percentage ───────────────────────────────────
+  // ─── UI helpers ───────────────────────────────────────────
   const currentIdx = STEPS_ORDER.indexOf(step);
-  const progress = step === "DONE" ? 100 : Math.round(((currentIdx >= 0 ? currentIdx : 0) / (STEPS_ORDER.length - 1)) * 100);
+  const progress =
+    step === "DONE"
+      ? 100
+      : Math.round(
+          ((currentIdx >= 0 ? currentIdx : 0) / (STEPS_ORDER.length - 1)) * 100
+        );
 
-  // ─── Mic animation ─────────────────────────────────────────
   const micClass =
     voiceState === "listening"
       ? "bg-red-500 shadow-red-500/40 scale-110"
@@ -611,7 +707,6 @@ export default function VoiceAssistantPage() {
 
   return (
     <div className="flex min-h-screen flex-col relative">
-      {/* Skip link */}
       <Link
         href="/login"
         className="absolute top-3 right-4 z-50 text-xs text-muted-foreground/50 hover:text-muted-foreground transition-colors"
@@ -627,7 +722,7 @@ export default function VoiceAssistantPage() {
               Voice Assistant
             </h1>
             <p className="text-xl text-muted-foreground">குரல் உதவியாளர்</p>
-            <p className="text-sm text-muted-foreground/70 max-w-xs mx-auto">
+            <p className="text-sm text-muted-foreground/70 max-w-xs mx-auto leading-relaxed">
               Just talk about your civic issue. No typing needed.
               <br />
               தமிழ் மற்றும் English-ல் பேசலாம்.
@@ -637,28 +732,26 @@ export default function VoiceAssistantPage() {
           <button
             onClick={runConversation}
             disabled={!isSupported}
-            className="relative flex h-44 w-44 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-2xl shadow-emerald-500/30 transition-all hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="relative flex h-44 w-44 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-2xl shadow-emerald-500/30 transition-all hover:scale-105 active:scale-95 disabled:opacity-50"
           >
             <Mic className="h-20 w-20" />
-            {/* Pulse rings */}
             <span className="absolute inset-0 rounded-full border-2 border-emerald-400/30 animate-ping" />
-            <span className="absolute inset-0 rounded-full border border-emerald-400/20 animate-pulse" />
           </button>
 
           <p className="text-lg font-semibold text-emerald-500 animate-pulse">
-            Tap to Start Talking
+            Tap to Start
           </p>
 
           {!isSupported && (
             <div className="rounded-xl bg-amber-500/10 border border-amber-500/20 px-5 py-3 text-sm text-amber-600 max-w-sm text-center">
-              ⚠️ Voice requires Chrome or Edge browser. Please switch to Chrome.
+              ⚠️ Voice requires Chrome or Edge. Please switch browser.
             </div>
           )}
         </div>
       ) : (
         /* ─── ACTIVE CONVERSATION ─── */
         <div className="flex flex-1 flex-col">
-          {/* Progress bar */}
+          {/* Progress */}
           <div className="sticky top-0 z-40 bg-background/90 backdrop-blur-sm border-b border-border/30 px-4 py-2">
             <div className="flex items-center justify-between mb-1.5">
               <span className="text-xs font-medium text-muted-foreground">
@@ -668,29 +761,27 @@ export default function VoiceAssistantPage() {
             </div>
             <div className="h-1.5 rounded-full bg-muted overflow-hidden">
               <div
-                className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 transition-all duration-700 ease-out"
+                className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 transition-all duration-700"
                 style={{ width: `${progress}%` }}
               />
             </div>
           </div>
 
-          {/* Chat area */}
+          {/* Chat */}
           <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 max-w-lg mx-auto w-full">
-            {conversationLog.map((msg, i) => (
+            {chatLog.map((msg, i) => (
               <div
                 key={i}
-                className={`flex ${
-                  msg.role === "assistant" ? "justify-start" : "justify-end"
-                }`}
+                className={`flex ${msg.role === "assistant" ? "justify-start" : "justify-end"}`}
               >
                 <div
                   className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
                     msg.role === "assistant"
-                      ? "bg-blue-500/10 text-foreground border border-blue-500/20"
-                      : "bg-emerald-500/10 text-foreground border border-emerald-500/20"
+                      ? "bg-blue-500/10 border border-blue-500/20"
+                      : "bg-emerald-500/10 border border-emerald-500/20"
                   }`}
                 >
-                  <p className="text-[0.65rem] font-bold mb-0.5 opacity-60">
+                  <p className="text-[0.65rem] font-bold mb-0.5 opacity-50">
                     {msg.role === "assistant" ? "🤖 Assistant" : "🗣️ You"}
                   </p>
                   {msg.text}
@@ -698,10 +789,10 @@ export default function VoiceAssistantPage() {
               </div>
             ))}
 
-            {/* Live interim text */}
+            {/* Live interim */}
             {voiceState === "listening" && interimText && (
               <div className="flex justify-end">
-                <div className="max-w-[85%] rounded-2xl px-4 py-2.5 text-sm bg-emerald-500/5 border border-emerald-500/10 text-muted-foreground italic">
+                <div className="max-w-[85%] rounded-2xl px-4 py-2 text-sm bg-emerald-500/5 border border-dashed border-emerald-500/20 text-muted-foreground italic">
                   {interimText}...
                 </div>
               </div>
@@ -710,7 +801,7 @@ export default function VoiceAssistantPage() {
             <div ref={chatEndRef} />
           </div>
 
-          {/* Photo area */}
+          {/* Photo */}
           <input
             ref={cameraInputRef}
             type="file"
@@ -719,17 +810,12 @@ export default function VoiceAssistantPage() {
             onChange={handlePhotoCapture}
             className="hidden"
           />
-
           {step === "PHOTO" && (
             <div className="px-4 pb-2 max-w-lg mx-auto w-full">
               {data.photoPreview ? (
                 <div className="relative rounded-xl overflow-hidden border border-emerald-500/30">
-                  <img
-                    src={data.photoPreview}
-                    alt="Captured"
-                    className="w-full h-40 object-cover"
-                  />
-                  <div className="absolute top-2 right-2 bg-emerald-500 text-white rounded-full p-1.5 shadow-lg">
+                  <img src={data.photoPreview} alt="Photo" className="w-full h-40 object-cover" />
+                  <div className="absolute top-2 right-2 bg-emerald-500 text-white rounded-full p-1.5">
                     <Check className="h-4 w-4" />
                   </div>
                 </div>
@@ -737,7 +823,7 @@ export default function VoiceAssistantPage() {
                 <Button
                   onClick={() => cameraInputRef.current?.click()}
                   variant="outline"
-                  className="w-full h-20 text-base gap-3 border-dashed border-2 border-emerald-500/30 hover:bg-emerald-500/5"
+                  className="w-full h-20 text-base gap-3 border-dashed border-2 border-emerald-500/30"
                 >
                   <Camera className="h-7 w-7 text-emerald-500" />
                   📸 Tap to Take Photo
@@ -746,7 +832,7 @@ export default function VoiceAssistantPage() {
             </div>
           )}
 
-          {/* Done celebration */}
+          {/* Done */}
           {step === "DONE" && complaintId && (
             <div className="px-4 pb-2 max-w-lg mx-auto w-full">
               <div className="rounded-2xl bg-emerald-500/10 border border-emerald-500/20 p-6 text-center">
@@ -761,10 +847,9 @@ export default function VoiceAssistantPage() {
             </div>
           )}
 
-          {/* Bottom bar: Mic status + controls */}
+          {/* Bottom bar */}
           <div className="sticky bottom-0 border-t border-border/30 bg-background/90 backdrop-blur-sm px-4 py-3">
             <div className="flex items-center justify-between max-w-lg mx-auto">
-              {/* Mic indicator */}
               <div className="flex items-center gap-3">
                 <div
                   className={`flex h-12 w-12 items-center justify-center rounded-full shadow-lg transition-all duration-300 ${micClass}`}
@@ -779,18 +864,14 @@ export default function VoiceAssistantPage() {
                     <Mic className="h-5 w-5 text-white" />
                   )}
                 </div>
-                <div>
-                  <p className="text-sm font-medium">
-                    {voiceState === "listening" && "🔴 Listening..."}
-                    {voiceState === "speaking" && "🔊 Speaking..."}
-                    {voiceState === "idle" && isProcessing && "⏳ Processing..."}
-                    {voiceState === "idle" && !isProcessing && step === "DONE" && "✅ Complete!"}
-                    {voiceState === "idle" && !isProcessing && step !== "DONE" && "⏸️ Waiting..."}
-                  </p>
-                </div>
+                <p className="text-sm font-medium">
+                  {voiceState === "listening" && "🔴 Listening..."}
+                  {voiceState === "speaking" && "🔊 Speaking..."}
+                  {voiceState === "idle" && isProcessing && "⏳ Processing..."}
+                  {voiceState === "idle" && !isProcessing && step === "DONE" && "✅ Done!"}
+                  {voiceState === "idle" && !isProcessing && step !== "DONE" && "⏸️ Waiting..."}
+                </p>
               </div>
-
-              {/* Controls */}
               <div className="flex gap-2">
                 <Button onClick={handleRestart} variant="outline" size="sm" className="gap-1.5">
                   <RotateCcw className="h-3.5 w-3.5" />

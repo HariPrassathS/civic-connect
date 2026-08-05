@@ -9,43 +9,37 @@ interface UseVoiceEngineReturn {
   interimText: string;
   speak: (text: string, lang?: string) => Promise<void>;
   listen: (lang?: string, timeoutMs?: number) => Promise<string>;
-  listenContinuous: (
-    lang: string,
-    onInterim: (text: string) => void,
-    onFinal: (text: string) => void,
-    timeoutMs?: number
-  ) => void;
   stopListening: () => void;
   stopAll: () => void;
   isSupported: boolean;
 }
 
 /**
- * Production-grade voice engine with:
- * - Interim results (real-time transcript as user speaks)
- * - Continuous listening mode for long speech
- * - Auto-retry on silence (re-prompts user)
- * - Smart voice selection for Tamil/English
- * - Chrome resume hack (Chrome pauses synthesis after 15s)
+ * Production voice engine v3.
+ *
+ * Key fixes:
+ * 1. Anti-echo: 1.5s mandatory silence gap after TTS before STT starts
+ * 2. Chrome TTS 15s pause bug: auto-resume timer
+ * 3. Google voice prioritization for natural speech
+ * 4. Robust error handling — never throws, always resolves
+ * 5. Longer default timeouts for elderly users (12s)
  */
 export function useVoiceEngine(): UseVoiceEngineReturn {
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [interimText, setInterimText] = useState("");
   const recognitionRef = useRef<any>(null);
-  const synthRef = useRef<SpeechSynthesisUtterance | null>(null);
-  const resumeTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const resumeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const isSupported =
     typeof window !== "undefined" &&
     "speechSynthesis" in window &&
     ("SpeechRecognition" in window || "webkitSpeechRecognition" in window);
 
-  // ─── Chrome TTS bug fix ─────────────────────────────────────
-  // Chrome pauses speech synthesis after ~15s. We resume it every 10s.
+  // ─── Chrome TTS bug: auto-resume every 10s ──────────────────
   const startResumeTimer = useCallback(() => {
     if (resumeTimerRef.current) clearInterval(resumeTimerRef.current);
     resumeTimerRef.current = setInterval(() => {
-      if (typeof window !== "undefined" && window.speechSynthesis.speaking) {
+      if (typeof window !== "undefined" && window.speechSynthesis?.speaking) {
         window.speechSynthesis.pause();
         window.speechSynthesis.resume();
       }
@@ -59,25 +53,28 @@ export function useVoiceEngine(): UseVoiceEngineReturn {
     }
   }, []);
 
-  // ─── Smart voice picker ─────────────────────────────────────
+  // ─── Pick best voice for language ───────────────────────────
   const pickVoice = useCallback((lang: string): SpeechSynthesisVoice | null => {
     if (typeof window === "undefined") return null;
     const voices = window.speechSynthesis.getVoices();
-    const langPrefix = lang.split("-")[0];
+    if (!voices.length) return null;
 
-    // Priority: Google voices > local voices > any match
-    const googleVoice = voices.find(
+    const langPrefix = lang.split("-")[0]; // "ta" from "ta-IN"
+
+    // Priority 1: Google online voices (highest quality)
+    const google = voices.find(
       (v) => v.lang.startsWith(langPrefix) && v.name.toLowerCase().includes("google")
     );
-    if (googleVoice) return googleVoice;
+    if (google) return google;
 
-    const networkVoice = voices.find(
+    // Priority 2: Any online/network voice
+    const network = voices.find(
       (v) => v.lang.startsWith(langPrefix) && !v.localService
     );
-    if (networkVoice) return networkVoice;
+    if (network) return network;
 
-    const localVoice = voices.find((v) => v.lang.startsWith(langPrefix));
-    return localVoice || null;
+    // Priority 3: Any matching voice
+    return voices.find((v) => v.lang.startsWith(langPrefix)) || null;
   }, []);
 
   // ─── TTS: Speak text aloud ──────────────────────────────────
@@ -89,33 +86,44 @@ export function useVoiceEngine(): UseVoiceEngineReturn {
           return;
         }
 
+        // Kill any ongoing speech & recognition first
         window.speechSynthesis.cancel();
         stopResumeTimer();
+        if (recognitionRef.current) {
+          try { recognitionRef.current.abort(); } catch {}
+          recognitionRef.current = null;
+        }
 
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.lang = lang;
-        utterance.rate = 0.85; // Slower for elderly
-        utterance.pitch = 1.05;
+        utterance.rate = 0.82; // Slow and clear for elders
+        utterance.pitch = 1.0;
         utterance.volume = 1.0;
 
         const voice = pickVoice(lang);
         if (voice) utterance.voice = voice;
 
-        synthRef.current = utterance;
         setVoiceState("speaking");
         startResumeTimer();
 
-        utterance.onend = () => {
+        let resolved = false;
+        const safeResolve = () => {
+          if (resolved) return;
+          resolved = true;
           stopResumeTimer();
           setVoiceState("idle");
           resolve();
         };
+
+        utterance.onend = safeResolve;
         utterance.onerror = (e) => {
-          stopResumeTimer();
-          setVoiceState("idle");
           console.warn("TTS error:", e.error);
-          resolve();
+          safeResolve();
         };
+
+        // Safety timeout: if TTS doesn't fire onend (rare bug), resolve after estimated time
+        const estimatedDuration = Math.max(3000, text.length * 80); // ~80ms per char
+        setTimeout(safeResolve, estimatedDuration);
 
         window.speechSynthesis.speak(utterance);
       });
@@ -123,9 +131,9 @@ export function useVoiceEngine(): UseVoiceEngineReturn {
     [pickVoice, startResumeTimer, stopResumeTimer]
   );
 
-  // ─── STT: Single-shot listen with timeout ───────────────────
+  // ─── STT: Listen with interim results ───────────────────────
   const listen = useCallback(
-    (lang: string = "ta-IN", timeoutMs: number = 8000): Promise<string> => {
+    (lang: string = "ta-IN", timeoutMs: number = 12000): Promise<string> => {
       return new Promise((resolve) => {
         if (typeof window === "undefined") {
           resolve("");
@@ -150,7 +158,7 @@ export function useVoiceEngine(): UseVoiceEngineReturn {
         recognitionRef.current = recognition;
 
         recognition.lang = lang;
-        recognition.interimResults = true; // Show real-time text
+        recognition.interimResults = true;
         recognition.maxAlternatives = 3;
         recognition.continuous = false;
 
@@ -170,12 +178,10 @@ export function useVoiceEngine(): UseVoiceEngineReturn {
           resolve(text);
         };
 
-        // Timeout: if no speech detected, resolve with empty
+        // Timeout: resolve with whatever we have
         const timer = setTimeout(() => {
-          if (!resolved) {
-            try { recognition.stop(); } catch {}
-            safeResolve(finalTranscript);
-          }
+          try { recognition.stop(); } catch {}
+          safeResolve(finalTranscript);
         }, timeoutMs);
 
         recognition.onresult = (event: any) => {
@@ -209,87 +215,6 @@ export function useVoiceEngine(): UseVoiceEngineReturn {
     []
   );
 
-  // ─── STT: Continuous listen for long speech ─────────────────
-  const listenContinuous = useCallback(
-    (
-      lang: string,
-      onInterim: (text: string) => void,
-      onFinal: (text: string) => void,
-      timeoutMs: number = 15000
-    ) => {
-      if (typeof window === "undefined") return;
-
-      const SpeechRecognition =
-        (window as any).SpeechRecognition ||
-        (window as any).webkitSpeechRecognition;
-
-      if (!SpeechRecognition) return;
-
-      if (recognitionRef.current) {
-        try { recognitionRef.current.abort(); } catch {}
-      }
-
-      const recognition = new SpeechRecognition();
-      recognitionRef.current = recognition;
-
-      recognition.lang = lang;
-      recognition.interimResults = true;
-      recognition.maxAlternatives = 1;
-      recognition.continuous = true;
-
-      setVoiceState("listening");
-
-      let fullTranscript = "";
-
-      const timer = setTimeout(() => {
-        try { recognition.stop(); } catch {}
-      }, timeoutMs);
-
-      recognition.onresult = (event: any) => {
-        let interim = "";
-        let sessionFinal = "";
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const text = event.results[i][0].transcript;
-          if (event.results[i].isFinal) {
-            sessionFinal += text;
-          } else {
-            interim += text;
-          }
-        }
-        if (sessionFinal) {
-          fullTranscript += sessionFinal + " ";
-        }
-        onInterim(fullTranscript + interim);
-        setInterimText(fullTranscript + interim);
-      };
-
-      recognition.onend = () => {
-        clearTimeout(timer);
-        setVoiceState("idle");
-        setInterimText("");
-        recognitionRef.current = null;
-        onFinal(fullTranscript.trim());
-      };
-
-      recognition.onerror = (event: any) => {
-        clearTimeout(timer);
-        console.warn("Continuous STT error:", event.error);
-        setVoiceState("idle");
-        setInterimText("");
-        recognitionRef.current = null;
-        onFinal(fullTranscript.trim());
-      };
-
-      try {
-        recognition.start();
-      } catch (e) {
-        console.warn("Continuous STT start failed:", e);
-        onFinal("");
-      }
-    },
-    []
-  );
-
   // ─── Stop listening ─────────────────────────────────────────
   const stopListening = useCallback(() => {
     if (recognitionRef.current) {
@@ -316,7 +241,6 @@ export function useVoiceEngine(): UseVoiceEngineReturn {
     interimText,
     speak,
     listen,
-    listenContinuous,
     stopListening,
     stopAll,
     isSupported,

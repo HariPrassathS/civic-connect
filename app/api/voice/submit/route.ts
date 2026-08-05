@@ -120,14 +120,13 @@ export async function POST(request: Request) {
         category_id: categoryId,
         ward_id: wardId,
         title,
-        description,
+        description: description + "\n\n[Reported via Voice Assistant]",
         lat: lat || null,
         lng: lng || null,
         address: address || null,
         status: "received",
         urgency: urgency || "medium",
         visibility: "public",
-        source: "voice_assistant",
       })
       .select("id")
       .single();

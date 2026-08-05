@@ -371,7 +371,13 @@ export default function LoginPage() {
           </Link>
         </p>
         
-        <div className="w-full border-t border-border/50 pt-4 text-center">
+        <div className="w-full border-t border-border/50 pt-4 space-y-3 text-center">
+          <Link
+            href="/voice-assistant"
+            className="flex items-center justify-center gap-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-4 py-2.5 text-sm font-semibold text-emerald-500 hover:bg-emerald-500/20 transition-colors"
+          >
+            🎤 Can&apos;t type? Talk to our Voice Assistant
+          </Link>
           <Link
             href="/official-login"
             className="text-xs font-semibold tracking-wide text-indigo-400 hover:text-indigo-300 transition-colors"

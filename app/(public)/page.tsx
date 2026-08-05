@@ -9,6 +9,7 @@ import {
   Users,
   Zap,
   Map,
+  Mic,
 } from "lucide-react";
 
 export default function LandingPage() {
@@ -93,6 +94,22 @@ export default function LandingPage() {
                   Track an Issue
                 </Button>
               </Link>
+            </div>
+
+            {/* Voice Assistant CTA for elders */}
+            <div className="mt-6 flex flex-col items-center">
+              <Link href="/voice-assistant">
+                <Button
+                  size="lg"
+                  className="h-14 gap-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 px-8 text-base font-semibold text-white shadow-lg shadow-emerald-500/25 transition-all hover:scale-105 hover:shadow-xl hover:shadow-emerald-500/30"
+                >
+                  <Mic className="h-5 w-5" />
+                  🎤 Voice Assistant — Talk to Report
+                </Button>
+              </Link>
+              <p className="mt-2 text-xs text-muted-foreground">
+                For elders & non-literate citizens · No typing needed · Tamil / English
+              </p>
             </div>
           </div>
         </section>

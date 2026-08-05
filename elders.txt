@@ -1,0 +1,382 @@
+================================================================================
+  CIVIC CONNECT — ELDER & ACCESSIBILITY MODE
+  Voice-First Assistant for Senior Citizens & Non-Literate Users
+  Version: 1.0 (Concept & Workflow Plan)
+  Date: 2026-08-05
+================================================================================
+
+
+1. THE PROBLEM
+================================================================================
+
+Civic Connect currently requires users to:
+  - Read text on screen
+  - Type complaints
+  - Navigate menus
+  - Upload photos with descriptions
+  - Understand UI elements like buttons, tabs, forms
+
+This works great for educated, tech-savvy citizens. But India's real civic
+issues are most often faced by:
+  - Senior citizens (60+) who can't read small text or navigate apps
+  - Non-literate or semi-literate citizens who can't type
+  - Rural users unfamiliar with smartphone apps
+  - Visually impaired users
+
+These are the people who MOST need civic services but are LEAST able to
+use digital platforms. We must bridge this gap.
+
+
+2. THE SOLUTION — VOICE-FIRST ASSISTANT
+================================================================================
+
+When a citizen opens the app, a friendly AI voice assistant automatically
+greets them in their preferred language (Tamil / English / Hindi). The
+assistant takes over the ENTIRE complaint process through natural
+conversation. The citizen simply TALKS and optionally takes a PHOTO.
+
+No reading. No typing. No navigation. Just talk.
+
+
+3. USER FLOW — ELDER MODE (DETAILED)
+================================================================================
+
+STEP 1: APP LAUNCH & DETECTION
+─────────────────────────────────
+  - Citizen opens the app (PWA or native)
+  - A splash screen appears for 2 seconds with a large, friendly message:
+      "🎤 Tap anywhere to talk to our assistant"
+      (Also displayed in Tamil: "எங்கள் உதவியாளரிடம் பேச எங்கும் தட்டவும்")
+  - If the user taps the screen → Voice Assistant activates (Elder Mode)
+  - If the user taps "Skip" (small text at bottom) → Normal login page loads
+  - Auto-timeout: If no interaction for 5 seconds, voice assistant
+    auto-activates with a greeting audio
+
+STEP 2: VOICE GREETING & LANGUAGE SELECTION
+─────────────────────────────────────────────
+  Assistant speaks:
+    "Vanakkam! Naan Civic Connect assistant. Unga complaint-a
+     register panna naan help pannren. Tamil la pesalama,
+     English la pesalama?"
+
+    (Translation: "Hello! I am the Civic Connect assistant.
+     I will help you register your complaint. Shall we speak
+     in Tamil or English?")
+
+  - Speech Recognition listens for: "Tamil" / "English" / "Hindi"
+  - Sets language for the rest of the conversation
+  - Falls back to Tamil if no response detected
+
+STEP 3: COLLECT CITIZEN IDENTITY (CONVERSATIONAL)
+──────────────────────────────────────────────────
+  Assistant speaks:
+    "Unga paeru enna?"  (What is your name?)
+  Citizen says:
+    "Raman"
+
+  Assistant speaks:
+    "Raman, unga phone number sollunga"  (Tell me your phone number)
+  Citizen says:
+    "98765 43210"
+
+  Assistant speaks:
+    "Unga area enna? District enna?"  (What is your area? District?)
+  Citizen says:
+    "Anna Nagar, Chennai"
+
+  → The assistant uses GPS as a fallback/verification:
+    "Naan unga location detect panniten — Anna Nagar, Chennai.
+     Correct aa?"  (I detected your location — is this correct?)
+
+STEP 4: COLLECT COMPLAINT (CONVERSATIONAL)
+───────────────────────────────────────────
+  Assistant speaks:
+    "Enna problem irukku? Sollunga, naan note pannikiren"
+    (What is the problem? Tell me, I will note it down)
+
+  Citizen says:
+    "Enga veettu munnadi road la periya gundhu irukku,
+     rendu naal aa yaarum fix pannala"
+    (There is a big pothole in front of our house,
+     nobody has fixed it for two days)
+
+  → AI processes the speech and extracts:
+    - Issue Type: Road / Pothole
+    - Description: Large pothole in front of house, unfixed for 2 days
+    - Location: Already captured from Step 3
+    - Urgency: Medium (inferred from "two days")
+
+  Assistant confirms:
+    "Unga veettu munnadi road la pothole irukku nu puriyuthu.
+     Correct aa?"
+    (I understand there is a pothole in front of your house. Correct?)
+
+  Citizen says: "Aama" (Yes)
+
+STEP 5: PHOTO CAPTURE (OPTIONAL, GUIDED)
+──────────────────────────────────────────
+  Assistant speaks:
+    "Problem-oda photo edukka mudiyuma? Phone-a problem pakka
+     point pannunga, naan photo eduthukiren"
+    (Can you take a photo of the problem? Point your phone
+     at the problem, I will take the photo)
+
+  → Camera opens automatically in a simplified full-screen view
+  → Large "📸" button or voice command "photo edu" to capture
+  → AI validates the photo (is it relevant? is it clear?)
+
+  If photo is blurry:
+    "Photo konjam clear illa, innum oru thadava try pannunga"
+    (Photo is not clear, please try once more)
+
+  If no photo:
+    "Paravala, photo illama kuda complaint register pannalam"
+    (No problem, we can register the complaint even without a photo)
+
+STEP 6: CONFIRMATION & SUBMISSION
+──────────────────────────────────
+  Assistant speaks:
+    "Raman, unga complaint ready:
+     Road pothole — Anna Nagar, Chennai.
+     Submit pannava?"
+    (Your complaint is ready. Shall I submit?)
+
+  Citizen says: "Aama, pannu" (Yes, do it)
+
+  → Complaint is submitted to the backend
+  → A complaint ID is generated
+
+  Assistant speaks:
+    "Unga complaint successfully register aachichu!
+     Complaint number: CC-2026-4521.
+     Naanga itha 48 hours la resolve panna try pannuven.
+     Nandri!"
+    (Your complaint has been successfully registered!
+     We will try to resolve it within 48 hours. Thank you!)
+
+STEP 7: FOLLOW-UP (FUTURE VISITS)
+───────────────────────────────────
+  When the citizen opens the app again:
+  
+  Assistant speaks:
+    "Vanakkam Raman! Unga last complaint — road pothole —
+     ippo 'In Progress' la irukku. Field worker Ravi Kumar
+     assign aayirukkar. Vera enna help venum?"
+    (Hello Raman! Your last complaint is now In Progress.
+     Field worker Ravi Kumar has been assigned. What else
+     can I help with?)
+
+
+4. TECH STACK FOR VOICE ASSISTANT
+================================================================================
+
+  COMPONENT                  TECHNOLOGY OPTIONS
+  ─────────────────────────  ─────────────────────────────────────────
+  Speech-to-Text (STT)       Web Speech API (free, browser-native)
+                              OR Google Cloud Speech-to-Text (paid, better)
+                              OR Whisper API (OpenAI, multilingual)
+
+  Text-to-Speech (TTS)       Web Speech API (free, browser-native)
+                              OR Google Cloud TTS (natural voices)
+                              OR ElevenLabs (premium natural voices)
+
+  AI Understanding (NLU)     Gemini API (already integrated in project)
+                              → Extract intent, category, urgency, location
+                              → Multilingual understanding (Tamil/English)
+
+  Language Detection          Gemini API or simple keyword matching
+
+  Photo Validation            Gemini Vision API (already have access)
+                              → "Is this a photo of a civic issue?"
+                              → "Is the photo clear enough?"
+
+  Location                   Browser Geolocation API (already implemented)
+                              + Nominatim reverse geocoding (already built)
+
+  State Management            React Context or Zustand for conversation flow
+
+
+5. CONVERSATION STATE MACHINE
+================================================================================
+
+  ┌─────────────┐
+  │  APP OPENS   │
+  └──────┬───────┘
+         │
+         ▼
+  ┌─────────────┐     User taps "Skip"     ┌──────────────┐
+  │ SPLASH SCREEN├─────────────────────────►│ NORMAL LOGIN │
+  └──────┬───────┘                          └──────────────┘
+         │ User taps screen / auto-timeout
+         ▼
+  ┌─────────────┐
+  │  LANGUAGE    │ ← "Tamil" / "English"
+  │  SELECTION   │
+  └──────┬───────┘
+         ▼
+  ┌─────────────┐
+  │  COLLECT     │ ← Name, Phone, Area
+  │  IDENTITY    │
+  └──────┬───────┘
+         ▼
+  ┌─────────────┐
+  │  COLLECT     │ ← Citizen describes problem in natural language
+  │  COMPLAINT   │
+  └──────┬───────┘
+         ▼
+  ┌─────────────┐
+  │  PHOTO       │ ← Optional camera capture
+  │  CAPTURE     │
+  └──────┬───────┘
+         ▼
+  ┌─────────────┐
+  │  CONFIRM &   │ ← AI reads back summary, citizen confirms
+  │  SUBMIT      │
+  └──────┬───────┘
+         ▼
+  ┌─────────────┐
+  │  THANK YOU   │ ← Complaint ID spoken aloud
+  │  & DONE      │
+  └─────────────┘
+
+
+6. UI DESIGN — ELDER MODE
+================================================================================
+
+  PRINCIPLE: Minimum visual, maximum audio.
+
+  - Background: Calm, solid color (not dark mode — elders prefer light)
+  - Center of screen: Large animated microphone icon (pulsing when listening)
+  - Bottom: Large text showing what the assistant is saying (for semi-literate)
+  - Font size: Minimum 24px for all text
+  - Colors: High contrast (dark text on light background)
+  - No small buttons, no hamburger menus, no tabs
+  - Single tap anywhere = "I'm talking"
+  - Swipe down = "Go back"
+  - Shake phone = "Cancel and restart"
+
+  VISUAL LAYOUT:
+  ┌────────────────────────────────┐
+  │                                │
+  │    🎤  (Large pulsing mic)     │
+  │                                │
+  │   "Tell me your problem..."    │  ← Live subtitle of assistant
+  │                                │
+  │   ┌──────────────────────┐     │
+  │   │  "Road la gundhu      │     │  ← Live transcript of citizen
+  │   │   irukku..."          │     │
+  │   └──────────────────────┘     │
+  │                                │
+  │   [ 📸 Take Photo ]            │  ← Only shown when needed
+  │                                │
+  └────────────────────────────────┘
+
+
+7. ACCESSIBILITY FEATURES
+================================================================================
+
+  FEATURE                     DESCRIPTION
+  ─────────────────────────   ─────────────────────────────────────────
+  Auto-Voice Activation       No need to find and press buttons
+  Large Touch Targets          Entire screen is a tap target
+  High Contrast Mode           Light background, dark text, large fonts
+  Haptic Feedback              Phone vibrates when assistant starts/stops
+  Repeat Last Message          Citizen says "Innum oru thadava sollu"
+  Speed Control                Slower speech rate for elderly users
+  Offline Fallback             If no internet, record audio locally and
+                               sync when connection is restored
+  Emergency Shortcut           Triple-tap for emergency complaints
+  Family Sharing               Send complaint copy to family member via SMS
+
+
+8. DATABASE CHANGES NEEDED
+================================================================================
+
+  NEW TABLE: voice_complaints
+  ─────────────────────────────────────────────────────────────────────
+  Column              Type              Description
+  ─────────────────── ────────────────  ───────────────────────────────
+  id                  uuid (PK)         Auto-generated
+  citizen_name        text              Spoken name
+  citizen_phone       text              Spoken phone number
+  language            text              Selected language (ta/en/hi)
+  audio_url           text              Stored audio recording URL
+  transcript          text              Full conversation transcript
+  ai_extracted_type   text              AI-detected issue category
+  ai_extracted_desc   text              AI-generated description
+  photo_url           text              Uploaded photo URL
+  lat                 double precision  GPS latitude
+  lng                 double precision  GPS longitude
+  address             text              Reverse-geocoded address
+  status              text              Complaint status
+  complaint_id        uuid (FK)         Links to main complaints table
+  created_at          timestamptz       Auto-generated
+
+  → Voice complaints are eventually converted into regular complaints
+    in the main `complaints` table so officials see them normally.
+
+
+9. GEMINI AI PROMPT TEMPLATE (FOR NLU)
+================================================================================
+
+  System Prompt:
+  "You are a civic complaint extraction AI. A citizen has described their
+   problem in spoken Tamil/English. Extract the following fields from their
+   speech:
+   
+   1. issue_type: One of [road, water, electricity, garbage, drainage,
+      sanitation, streetlight, other]
+   2. description: A clear English summary of the problem (2-3 sentences)
+   3. urgency: One of [low, medium, high, urgent]
+   4. landmarks: Any landmarks or specific locations mentioned
+   
+   Respond in JSON format only."
+
+  User Input:
+  "{citizen_speech_transcript}"
+
+
+10. IMPLEMENTATION PHASES
+================================================================================
+
+  PHASE 1 — MVP (Week 1)
+  ───────────────────────
+  ✦ Splash screen with "Tap to Talk" prompt
+  ✦ Basic Web Speech API for STT and TTS
+  ✦ Hardcoded Tamil conversation flow
+  ✦ Gemini API for complaint extraction
+  ✦ Photo capture integration
+  ✦ Submit to existing complaints table
+
+  PHASE 2 — POLISH (Week 2)
+  ──────────────────────────
+  ✦ Multi-language support (Tamil, English, Hindi)
+  ✦ Conversation memory (returning users)
+  ✦ Audio recording storage (for review/audit)
+  ✦ Animated UI with microphone visualization
+  ✦ Offline mode (record and sync later)
+
+  PHASE 3 — ADVANCED (Week 3+)
+  ─────────────────────────────
+  ✦ Follow-up tracking via voice
+  ✦ Family member notification via SMS
+  ✦ Voice-based complaint status checking
+  ✦ Integration with Telegram bot for voice messages
+  ✦ Analytics dashboard for voice vs text complaints
+
+
+11. KEY DIFFERENTIATOR
+================================================================================
+
+  This feature transforms Civic Connect from a "tech-literate-only" platform
+  into a truly INCLUSIVE civic system. No other civic complaint platform in
+  India offers a fully conversational, voice-first experience that works for
+  illiterate senior citizens.
+
+  This is not just a feature — it's a social impact statement.
+
+
+================================================================================
+  END OF DOCUMENT
+  Next Step: Get user approval → Start Phase 1 implementation
+================================================================================

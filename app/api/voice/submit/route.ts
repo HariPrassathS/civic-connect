@@ -113,6 +113,8 @@ export async function POST(request: Request) {
     }
 
     // 5. Insert complaint
+    const finalDesc = `${description}\n\n[Location: ${area || address || "Unknown"}]\n[Reported via Voice Assistant]`;
+    
     const { data: complaint, error: complaintError } = await supabaseAdmin
       .from("complaints")
       .insert({
@@ -120,10 +122,9 @@ export async function POST(request: Request) {
         category_id: categoryId,
         ward_id: wardId,
         title,
-        description: description + "\n\n[Reported via Voice Assistant]",
+        description: finalDesc,
         lat: lat || null,
         lng: lng || null,
-        address: address || null,
         status: "received",
         urgency: urgency || "medium",
         visibility: "public",

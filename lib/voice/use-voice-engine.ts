@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState, useEffect } from "react";
 
 export type VoiceState = "idle" | "listening" | "speaking";
 
@@ -27,13 +27,18 @@ interface UseVoiceEngineReturn {
 export function useVoiceEngine(): UseVoiceEngineReturn {
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [interimText, setInterimText] = useState("");
+  const [isSupported, setIsSupported] = useState(true); // default to true on server to prevent mismatch if we want, or handle explicitly
   const recognitionRef = useRef<any>(null);
   const resumeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const isSupported =
-    typeof window !== "undefined" &&
-    "speechSynthesis" in window &&
-    ("SpeechRecognition" in window || "webkitSpeechRecognition" in window);
+  // Check support on mount to avoid SSR hydration mismatch
+  useEffect(() => {
+    setIsSupported(
+      typeof window !== "undefined" &&
+      "speechSynthesis" in window &&
+      ("SpeechRecognition" in window || "webkitSpeechRecognition" in window)
+    );
+  }, []);
 
   // ─── Chrome TTS bug: auto-resume every 10s ──────────────────
   const startResumeTimer = useCallback(() => {
@@ -96,7 +101,7 @@ export function useVoiceEngine(): UseVoiceEngineReturn {
 
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.lang = lang;
-        utterance.rate = 0.82; // Slow and clear for elders
+        utterance.rate = 0.95; // Natural speed
         utterance.pitch = 1.0;
         utterance.volume = 1.0;
 

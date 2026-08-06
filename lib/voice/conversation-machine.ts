@@ -7,7 +7,6 @@ export type ConversationStep =
   | "GREETING"
   | "LANGUAGE"
   | "NAME"
-  | "PHONE"
   | "LOCATION"
   | "COMPLAINT"
   | "PHOTO"
@@ -21,7 +20,6 @@ export type Language = "ta" | "en";
 export interface CollectedData {
   language: Language;
   name: string;
-  phone: string;
   lat: number;
   lng: number;
   address: string;
@@ -30,7 +28,6 @@ export interface CollectedData {
   complaintText: string;
   photoFile: File | null;
   photoPreview: string | null;
-  // AI-extracted fields
   issueType: string;
   title: string;
   description: string;
@@ -40,7 +37,6 @@ export interface CollectedData {
 export const INITIAL_DATA: CollectedData = {
   language: "ta",
   name: "",
-  phone: "",
   lat: 0,
   lng: 0,
   address: "",
@@ -59,14 +55,10 @@ type Prompts = Record<Language, string>;
 
 interface StepConfig {
   prompts: Prompts;
-  speechLang: Record<Language, string>; // BCP47 tag for speech
+  speechLang: Record<Language, string>;
   nextStep: ConversationStep;
 }
 
-/**
- * All conversation step configurations.
- * Each step has prompts in Tamil and English.
- */
 export const STEP_CONFIG: Record<string, StepConfig> = {
   GREETING: {
     prompts: {
@@ -86,16 +78,8 @@ export const STEP_CONFIG: Record<string, StepConfig> = {
   },
   NAME: {
     prompts: {
-      ta: "நன்றி! உங்கள் போன் நம்பர் சொல்லுங்கள்.",
-      en: "Thank you! Please tell me your phone number.",
-    },
-    speechLang: { ta: "ta-IN", en: "en-IN" },
-    nextStep: "PHONE",
-  },
-  PHONE: {
-    prompts: {
-      ta: "சரி. இப்போது உங்கள் லொக்கேஷன் கண்டுபிடிக்கிறேன்... ஒரு நிமிடம்.",
-      en: "Got it. Now let me detect your location... One moment.",
+      ta: "நன்றி! உங்கள் லொக்கேஷன் கண்டுபிடிக்கிறேன்... ஒரு நிமிடம்.",
+      en: "Thank you! Let me detect your location... One moment.",
     },
     speechLang: { ta: "ta-IN", en: "en-IN" },
     nextStep: "LOCATION",
@@ -118,7 +102,7 @@ export const STEP_CONFIG: Record<string, StepConfig> = {
   },
   PHOTO: {
     prompts: {
-      ta: "",  // Dynamic — filled at runtime with summary
+      ta: "",
       en: "",
     },
     speechLang: { ta: "ta-IN", en: "en-IN" },
@@ -146,7 +130,7 @@ export const STEP_CONFIG: Record<string, StepConfig> = {
       en: "Your complaint has been registered successfully! We will try to resolve it within 48 hours. Thank you!",
     },
     speechLang: { ta: "ta-IN", en: "en-IN" },
-    nextStep: "DONE", // Terminal state
+    nextStep: "DONE",
   },
   ERROR: {
     prompts: {
@@ -158,25 +142,14 @@ export const STEP_CONFIG: Record<string, StepConfig> = {
   },
 };
 
-/**
- * Get the speech language tag for a step and selected language.
- */
 export function getSpeechLang(step: ConversationStep, lang: Language): string {
   return STEP_CONFIG[step]?.speechLang[lang] ?? "ta-IN";
 }
 
-/**
- * Get the prompt text for a step and language.
- */
 export function getPrompt(step: ConversationStep, lang: Language): string {
   return STEP_CONFIG[step]?.prompts[lang] ?? "";
 }
 
-/**
- * Detect language from user input.
- * If they say anything with "english" or "eng" → English
- * Otherwise → Tamil (default)
- */
 export function detectLanguageChoice(input: string): Language {
   const lower = input.toLowerCase().trim();
   if (
@@ -189,46 +162,22 @@ export function detectLanguageChoice(input: string): Language {
   return "ta";
 }
 
-/**
- * Extract phone number digits from speech.
- * People say numbers in various ways — just extract digits.
- */
-export function extractPhone(input: string): string {
-  // Remove all non-digit characters
-  const digits = input.replace(/\D/g, "");
-  // If starts with 91 and has 12 digits, strip country code
-  if (digits.startsWith("91") && digits.length === 12) {
-    return digits.slice(2);
-  }
-  // Return last 10 digits if longer
-  if (digits.length > 10) {
-    return digits.slice(-10);
-  }
-  return digits;
-}
-
-/**
- * Check if user confirmed (said yes).
- */
 export function isConfirmation(input: string): boolean {
   const lower = input.toLowerCase().trim();
   const confirmWords = [
     "yes", "yeah", "yep", "confirm", "submit", "ok", "okay",
-    "ஆமா", "ஆம்", "சரி", "பண்ணு", "செய்",
+    "ஆமா", "ஆம்", "சரி", "பண்ணு", "செய்", "ஓகே",
     "aama", "aam", "sari", "pannu",
     "ha", "haa", "haan",
   ];
   return confirmWords.some((w) => lower.includes(w));
 }
 
-/**
- * Check if user declined (said no).
- */
 export function isDenial(input: string): boolean {
   const lower = input.toLowerCase().trim();
   const denyWords = [
     "no", "nope", "cancel", "stop",
-    "வேண்டாம்", "இல்ல", "நிறுத்து",
+    "வேண்டாம்", "இல்ல", "நிறுத்து", "வேணாம்",
     "vendaam", "illa", "no photo",
   ];
   return denyWords.some((w) => lower.includes(w));

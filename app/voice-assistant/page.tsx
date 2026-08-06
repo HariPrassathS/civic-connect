@@ -297,104 +297,36 @@ export default function VoiceAssistantPage() {
       d.name = "Citizen";
     }
 
-    // ── STEP 3: PHONE ───────────────────────────────────────
-    try {
-      setStep("PHONE");
-      const phonePrompt =
-        lang === "ta"
-          ? `${d.name}, நன்றி! உங்கள் மொபைல் நம்பர் சொல்லுங்கள்.`
-          : `Thank you ${d.name}! Please tell me your mobile number.`;
-      const retryPhone =
-        lang === "ta"
-          ? "உங்கள் 10 இலக்க போன் நம்பர் மெதுவாக சொல்லுங்கள்."
-          : "Please say your 10-digit phone number slowly.";
-      const phoneInput = await askWithRetry(phonePrompt, retryPhone, lang, 15000);
-      d.phone = extractPhone(phoneInput);
-      setData({ ...d });
-
-      // Confirm phone if we got 10 digits
-      if (d.phone.length === 10) {
-        const spaced = d.phone.split("").join(", ");
-        const phoneCheck =
-          lang === "ta"
-            ? `உங்கள் நம்பர்: ${spaced}. சரியா?`
-            : `Your number: ${spaced}. Is that correct?`;
-        const confirmResp = await askAndListen(phoneCheck, lang, 8000);
-        if (isDenial(confirmResp)) {
-          const redo = await askAndListen(
-            lang === "ta"
-              ? "சரி, மீண்டும் மெதுவாக சொல்லுங்கள்."
-              : "Okay, please say it again slowly.",
-            lang,
-            15000
-          );
-          d.phone = extractPhone(redo);
-          setData({ ...d });
-        }
-      }
-    } catch (e) {
-      console.error("Step PHONE failed:", e);
-    }
-
-    // ── STEP 4: LOCATION (CRASH-PROOF) ──────────────────────
+    // ── STEP 3: LOCATION (CRASH-PROOF & MANUAL) ──────────────
     try {
       setStep("LOCATION");
-      await sayOnly(
+      
+      // Fetch GPS silently in background for coordinates (don't block speech)
+      safeGetLocation().then(loc => {
+        d.lat = loc.lat;
+        d.lng = loc.lng;
+        setData(prev => ({ ...prev, lat: loc.lat, lng: loc.lng }));
+      }).catch(() => {});
+
+      const locationPrompt =
         lang === "ta"
-          ? "சரி. உங்கள் இருப்பிடம் கண்டுபிடிக்கிறேன்..."
-          : "Okay. Detecting your location...",
-        lang
-      );
-
-      setIsProcessing(true);
-      const loc = await safeGetLocation();
-      d.lat = loc.lat;
-      d.lng = loc.lng;
-      d.address = loc.address;
-      d.district = loc.district;
-      d.area = loc.area;
+          ? `${d.name}, நன்றி! பிரச்சனை எந்த ஏரியாவில் உள்ளது? உங்கள் ஏரியா பெயரை சொல்லுங்கள்.`
+          : `Thank you ${d.name}! Which area is the problem located in? Tell me the area name.`;
+      const retryLoc =
+        lang === "ta"
+          ? "பிரச்சனை நடக்கும் ஏரியா பெயரை சொல்லுங்கள்."
+          : "Please say the name of the area.";
+      
+      const manualLoc = await askWithRetry(locationPrompt, retryLoc, lang, 12000, 2);
+      d.area = manualLoc || "Unknown Area";
+      d.address = d.area;
       setData({ ...d });
-      setIsProcessing(false);
 
-      if (loc.area) {
-        await sayOnly(
-          lang === "ta"
-            ? `உங்கள் இருப்பிடம்: ${loc.area}${loc.district ? `, ${loc.district}` : ""}. `
-            : `Your location: ${loc.area}${loc.district ? `, ${loc.district}` : ""}. `,
-          lang
-        );
-      } else if (loc.lat !== 0) {
-        await sayOnly(
-          lang === "ta"
-            ? "இருப்பிடம் கிடைத்தது."
-            : "Location detected.",
-          lang
-        );
-      } else {
-        // Location failed — ask user manually
-        const manualLoc = await askAndListen(
-          lang === "ta"
-            ? "இருப்பிடம் கண்டறிய இயலவில்லை. உங்கள் ஏரியா பெயர் சொல்லுங்கள்."
-            : "Could not detect location. Please tell me your area name.",
-          lang,
-          10000
-        );
-        if (manualLoc) {
-          d.area = manualLoc;
-          d.address = manualLoc;
-          setData({ ...d });
-        }
-      }
     } catch (e) {
       console.error("Step LOCATION failed:", e);
-      setIsProcessing(false);
-      // Don't crash — continue without location
-      await sayOnly(
-        lang === "ta"
-          ? "இருப்பிடம் பெற இயலவில்லை, ஆனால் பரவாயில்லை. தொடர்கிறேன்."
-          : "Could not get location, but that's fine. Continuing.",
-        lang
-      );
+      d.area = "Unknown Area";
+      d.address = "Unknown Area";
+      setData({ ...d });
     }
 
     // ── STEP 5: COMPLAINT ───────────────────────────────────
@@ -604,7 +536,6 @@ export default function VoiceAssistantPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: d.name,
-          phone: d.phone,
           lat: d.lat,
           lng: d.lng,
           address: d.address,
